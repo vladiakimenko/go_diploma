@@ -15,6 +15,7 @@ const (
 	SchedulerWorkers         = 5
 	SchedulerBufferSize      = 1000
 	SchedulerMaxJobQueueSize = 500
+	SchedulerFetchLimit      = 100
 )
 
 // StartPostScheduler launches a background scheduler to publish posts at their scheduled time
@@ -66,7 +67,7 @@ func StartPostScheduler(ctx context.Context, repo repository.PostRepository) {
 					Published: func(b bool) *bool { return &b }(false),
 					DueBefore: &now,
 				},
-				100, 0,
+				SchedulerFetchLimit, 0,
 			)
 			if err != nil {
 				logger.Error("scheduler failed to fetch due posts: %v", err)
