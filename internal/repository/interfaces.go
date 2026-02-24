@@ -38,7 +38,6 @@ type CommentRepository interface {
 	GetByID(ctx context.Context, id int) (*model.Comment, error)
 	GetByPostID(ctx context.Context, postID int, limit, offset int) ([]*model.Comment, error)
 	GetCountByPostID(ctx context.Context, postID int) (int, error)
-	GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Comment, error)
 	GetCountByAuthorID(ctx context.Context, authorID int) (int, error)
 	Update(ctx context.Context, comment *model.Comment) error
 	Delete(ctx context.Context, id int) error

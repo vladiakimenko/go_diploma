@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"sort"
-	"sync"
 	"testing"
 	"time"
 
@@ -20,140 +18,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// in-memory repo
-type InMemoryPostRepo struct {
-	mu    sync.RWMutex
-	seq   int
-	posts map[int]*model.Post
-}
-
-func NewInMemoryPostRepo() *InMemoryPostRepo {
-	return &InMemoryPostRepo{
-		posts: make(map[int]*model.Post),
-	}
-}
-
-func (r *InMemoryPostRepo) Create(ctx context.Context, post *model.Post) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.seq++
-	post.ID = r.seq
-	now := time.Now()
-	post.CreatedAt = now
-	post.UpdatedAt = now
-	r.posts[post.ID] = post
-	return nil
-}
-
-func (r *InMemoryPostRepo) GetPost(ctx context.Context, id int, filter *repository.PostFilter) (*model.Post, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	post, ok := r.posts[id]
-	if !ok {
-		return nil, repository.ErrPostNotFound
-	}
-
-	if filter != nil {
-		if filter.AuthorID != nil && post.AuthorID != *filter.AuthorID {
-			return nil, repository.ErrPostNotFound
-		}
-		if filter.Published != nil && post.Published != *filter.Published {
-			return nil, repository.ErrPostNotFound
-		}
-		if filter.DueBefore != nil && post.PublishAt != nil && post.PublishAt.After(*filter.DueBefore) {
-			return nil, repository.ErrPostNotFound
-		}
-	}
-
-	copy := *post
-	return &copy, nil
-}
-
-func (r *InMemoryPostRepo) GetPosts(ctx context.Context, filter *repository.PostFilter, limit, offset int) ([]*model.Post, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var result []*model.Post
-	for _, post := range r.posts {
-		if filter != nil {
-			if filter.AuthorID != nil && post.AuthorID != *filter.AuthorID {
-				continue
-			}
-			if filter.Published != nil && post.Published != *filter.Published {
-				continue
-			}
-			if filter.DueBefore != nil && post.PublishAt != nil && post.PublishAt.After(*filter.DueBefore) {
-				continue
-			}
-		}
-		result = append(result, post)
-	}
-
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CreatedAt.After(result[j].CreatedAt)
-	})
-
-	if offset >= len(result) {
-		return []*model.Post{}, nil
-	}
-
-	end := offset + limit
-	if limit <= 0 || end > len(result) {
-		end = len(result)
-	}
-
-	copied := make([]*model.Post, end-offset)
-	for i := offset; i < end; i++ {
-		p := *result[i]
-		copied[i-offset] = &p
-	}
-
-	return copied, nil
-}
-
-func (r *InMemoryPostRepo) GetPostsCount(ctx context.Context, filter *repository.PostFilter) (int, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	count := 0
-	for _, post := range r.posts {
-		if filter != nil {
-			if filter.AuthorID != nil && post.AuthorID != *filter.AuthorID {
-				continue
-			}
-			if filter.Published != nil && post.Published != *filter.Published {
-				continue
-			}
-			if filter.DueBefore != nil && post.PublishAt != nil && post.PublishAt.After(*filter.DueBefore) {
-				continue
-			}
-		}
-		count++
-	}
-	return count, nil
-}
-
-func (r *InMemoryPostRepo) Update(ctx context.Context, post *model.Post) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	existing, ok := r.posts[post.ID]
-	if !ok {
-		return repository.ErrPostNotFound
-	}
-	post.CreatedAt = existing.CreatedAt
-	post.UpdatedAt = time.Now()
-	r.posts[post.ID] = post
-	return nil
-}
-
-func (r *InMemoryPostRepo) Delete(ctx context.Context, id int) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.posts[id]; !ok {
-		return repository.ErrPostNotFound
-	}
-	delete(r.posts, id)
-	return nil
-}
-
 // utils
 func ptr[T any](v T) *T { return &v }
 
@@ -161,8 +25,8 @@ func ptr[T any](v T) *T { return &v }
 func newPostTestRouter() http.Handler {
 	logging.Init(&logging.LoggerConfig{})
 
-	postRepo := NewInMemoryPostRepo()
-	userRepo := NewInMemoryUserRepo()
+	postRepo := repository.NewInMemoryPostRepo()
+	userRepo := repository.NewInMemoryUserRepo()
 
 	ctx := context.Background()
 	userRepo.Create(ctx, &model.User{ID: 1, Username: "tester", Email: "tester@example.com"})
@@ -185,7 +49,7 @@ func newPostTestRouter() http.Handler {
 	protected.Post("/api/posts", middleware.ModelBodyMiddleware[model.PostCreateRequest](postHandler.Create))
 	protected.Put("/api/posts/{postID}", middleware.ModelBodyMiddleware[model.PostUpdateRequest](postHandler.Update))
 	protected.Delete("/api/posts/{postID}", postHandler.Delete)
-	
+
 	protected.Get("/api/delayed", postHandler.GetAllDelayed)
 	protected.Get("/api/delayed/{postID}", postHandler.GetDelayedByID)
 

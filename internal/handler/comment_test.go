@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,149 +17,13 @@ import (
 	"blog-api/pkg/logging"
 )
 
-// in-memory repo
-type InMemoryCommentRepo struct {
-	mu       sync.RWMutex
-	seq      int
-	comments map[int]*model.Comment
-}
-
-func NewInMemoryCommentRepo() *InMemoryCommentRepo {
-	return &InMemoryCommentRepo{
-		comments: make(map[int]*model.Comment),
-	}
-}
-
-func (r *InMemoryCommentRepo) Create(ctx context.Context, comment *model.Comment) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.seq++
-	comment.ID = r.seq
-	now := time.Now()
-	comment.CreatedAt = now
-	comment.UpdatedAt = now
-	r.comments[comment.ID] = comment
-	return nil
-}
-
-func (r *InMemoryCommentRepo) GetByID(ctx context.Context, id int) (*model.Comment, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	c, ok := r.comments[id]
-	if !ok {
-		return nil, repository.ErrCommentNotFound
-	}
-	copy := *c
-	return &copy, nil
-}
-
-func (r *InMemoryCommentRepo) GetByPostID(ctx context.Context, postID, limit, offset int) ([]*model.Comment, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var res []*model.Comment
-	for _, c := range r.comments {
-		if c.PostID == postID {
-			res = append(res, c)
-		}
-	}
-	if offset >= len(res) {
-		return []*model.Comment{}, nil
-	}
-	end := offset + limit
-	if limit <= 0 || end > len(res) {
-		end = len(res)
-	}
-	copied := make([]*model.Comment, end-offset)
-	for i := offset; i < end; i++ {
-		cc := *res[i]
-		copied[i-offset] = &cc
-	}
-	return copied, nil
-}
-
-func (r *InMemoryCommentRepo) GetCountByPostID(ctx context.Context, postID int) (int, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	count := 0
-	for _, c := range r.comments {
-		if c.PostID == postID {
-			count++
-		}
-	}
-	return count, nil
-}
-
-func (r *InMemoryCommentRepo) Update(ctx context.Context, comment *model.Comment) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	existing, ok := r.comments[comment.ID]
-	if !ok {
-		return repository.ErrCommentNotFound
-	}
-	comment.CreatedAt = existing.CreatedAt
-	comment.UpdatedAt = time.Now()
-	r.comments[comment.ID] = comment
-	return nil
-}
-
-func (r *InMemoryCommentRepo) Delete(ctx context.Context, id int) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.comments[id]; !ok {
-		return repository.ErrCommentNotFound
-	}
-	delete(r.comments, id)
-	return nil
-}
-
-func (r *InMemoryCommentRepo) GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Comment, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var res []*model.Comment
-	for _, c := range r.comments {
-		if c.AuthorID == authorID {
-			res = append(res, c)
-		}
-	}
-
-	if offset >= len(res) {
-		return []*model.Comment{}, nil
-	}
-
-	end := offset + limit
-	if limit <= 0 || end > len(res) {
-		end = len(res)
-	}
-
-	copied := make([]*model.Comment, end-offset)
-	for i := offset; i < end; i++ {
-		cc := *res[i]
-		copied[i-offset] = &cc
-	}
-	return copied, nil
-}
-
-func (r *InMemoryCommentRepo) GetCountByAuthorID(ctx context.Context, authorID int) (int, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	count := 0
-	for _, c := range r.comments {
-		if c.AuthorID == authorID {
-			count++
-		}
-	}
-	return count, nil
-}
-
 // setup
 func newCommentTestRouter() http.Handler {
 	logging.Init(&logging.LoggerConfig{})
 
-	commentRepo := NewInMemoryCommentRepo()
-	userRepo := NewInMemoryUserRepo()
-	postRepo := NewInMemoryPostRepo()
+	commentRepo := repository.NewInMemoryCommentRepo()
+	userRepo := repository.NewInMemoryUserRepo()
+	postRepo := repository.NewInMemoryPostRepo()
 
 	ctx := context.Background()
 

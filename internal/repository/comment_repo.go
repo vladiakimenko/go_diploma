@@ -62,20 +62,6 @@ func (r *CommentRepo) GetCountByPostID(ctx context.Context, postID int) (int, er
 	return int(count), nil
 }
 
-func (r *CommentRepo) GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Comment, error) {
-	var comments []*model.Comment
-	err := r.db.TxDB(ctx).
-		Where("author_id = ?", authorID).
-		Order("created_at ASC").
-		Limit(limit).
-		Offset(offset).
-		Find(&comments).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to get comments by author ID %d: %w", authorID, err)
-	}
-	return comments, nil
-}
-
 func (r *CommentRepo) GetCountByAuthorID(ctx context.Context, authorID int) (int, error) {
 	var count int64
 	err := r.db.TxDB(ctx).

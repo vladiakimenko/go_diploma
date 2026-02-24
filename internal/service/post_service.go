@@ -29,7 +29,7 @@ func StartPostScheduler(ctx context.Context, repo repository.PostRepository) {
 	wg := &sync.WaitGroup{}
 
 	// worker pool
-	for i := 0; i < SchedulerWorkers; i++ {
+	for i := range SchedulerWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -40,7 +40,7 @@ func StartPostScheduler(ctx context.Context, repo repository.PostRepository) {
 						return
 					}
 					post.Published = true
-					if err := repo.Update(context.Background(), post); err != nil {
+					if err := repo.Update(ctx, post); err != nil {
 						logger.Error("worker %d failed to publish post id=%d: %v", workerID, post.ID, err)
 					} else {
 						logger.Info("worker %d published post id=%d", workerID, post.ID)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +25,8 @@ import (
 )
 
 var logger = logging.L()
+
+const gracefulShutDownTimeout = 30 * time.Second
 
 func main() {
 
@@ -47,7 +51,7 @@ func main() {
 
 	// logger
 	logging.Init(loggingConfig)
-	logger.Info("Logger initialized")
+	logger.Info("logger initialized")
 
 	// database
 	db, err := database.NewDatabaseManager(dbConfig)
@@ -75,9 +79,8 @@ func main() {
 	commentService := service.NewCommentService(commentRepo, postRepo, userRepo)
 
 	// post scheduler
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go service.StartPostScheduler(ctx, postRepo)
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	go service.StartPostScheduler(schedulerCtx, postRepo)
 
 	// handlers
 	userHandler := handler.NewAuthHandler(userService)
@@ -188,9 +191,27 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	logger.Info("Starting server at %s...", addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("Server error: %v", err)
-		os.Exit(1)
+	go func() {
+		logger.Info("starting server at %s...", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Server error: %v", err)
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	<-quit
+	logger.Info("shutdown signal received")
+	schedulerCancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutDownTimeout)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("server shutdown failed: %v", err)
+	} else {
+		logger.Info("server shut down gracefully")
 	}
 }

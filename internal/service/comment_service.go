@@ -46,7 +46,7 @@ func (s *CommentService) Create(
 	if err != nil {
 		if errors.Is(err, repository.ErrPostNotFound) {
 			logger.Info("post with post_id=%d not found or not published", postID)
-			return nil, ErrCommentNotFound
+			return nil, ErrPostNotFound
 		}
 
 		logger.Error("failed to fetch post for post_id=%d: %v", postID, err)
@@ -147,25 +147,6 @@ func (s *CommentService) Delete(ctx context.Context, id int, userID int) error {
 		return ErrDatabase
 	}
 	return nil
-}
-
-func (s *CommentService) GetByAuthor(
-	ctx context.Context,
-	authorID int,
-	limit int,
-	offset int,
-) ([]*model.Comment, int, error) {
-	comments, err := s.commentRepo.GetByAuthorID(ctx, authorID, limit, offset)
-	if err != nil {
-		logger.Error("failed to fetch comments for author_id=%d: %v", authorID, err)
-		return nil, 0, ErrDatabase
-	}
-	total, err := s.commentRepo.GetCountByAuthorID(ctx, authorID)
-	if err != nil {
-		logger.Error("failed to count comments for author_id=%d: %v", authorID, err)
-		return nil, 0, ErrDatabase
-	}
-	return comments, total, nil
 }
 
 func (s *CommentService) checkOwner(comment *model.Comment, userID int) error {

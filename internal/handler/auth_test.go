@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -26,205 +23,6 @@ import (
 	"blog-api/pkg/logging"
 )
 
-// in-memory repos
-type InMemoryUserRepo struct {
-	mu    sync.RWMutex
-	seq   int
-	users map[int]*model.User
-}
-
-func NewInMemoryUserRepo() *InMemoryUserRepo {
-	return &InMemoryUserRepo{
-		users: make(map[int]*model.User),
-	}
-}
-
-func (r *InMemoryUserRepo) Create(ctx context.Context, user *model.User) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for _, u := range r.users {
-		if u.Email == user.Email || u.Username == user.Username {
-			return repository.ErrUserExists
-		}
-	}
-
-	r.seq++
-	user.ID = r.seq
-	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
-
-	r.users[user.ID] = user
-	return nil
-}
-
-func (r *InMemoryUserRepo) GetByID(ctx context.Context, id int) (*model.User, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	u, ok := r.users[id]
-	if !ok {
-		return nil, repository.ErrUserNotFound
-	}
-
-	copy := *u
-	return &copy, nil
-}
-
-func (r *InMemoryUserRepo) GetByField(ctx context.Context, field string, value any) (*model.User, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	for _, u := range r.users {
-		switch field {
-		case "email":
-			if u.Email == value {
-				copy := *u
-				return &copy, nil
-			}
-		case "username":
-			if u.Username == value {
-				copy := *u
-				return &copy, nil
-			}
-		case "id":
-			if u.ID == value {
-				copy := *u
-				return &copy, nil
-			}
-		default:
-			return nil, fmt.Errorf("unsupported field: %s", field)
-		}
-	}
-
-	return nil, repository.ErrUserNotFound
-}
-
-func (r *InMemoryUserRepo) ExistsByField(ctx context.Context, field string, value any) (bool, error) {
-	_, err := r.GetByField(ctx, field, value)
-	if err != nil {
-		if err == repository.ErrUserNotFound {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func (r *InMemoryUserRepo) Update(ctx context.Context, user *model.User) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	existing, ok := r.users[user.ID]
-	if !ok {
-		return repository.ErrUserNotFound
-	}
-
-	user.CreatedAt = existing.CreatedAt
-	user.UpdatedAt = time.Now()
-
-	r.users[user.ID] = user
-	return nil
-}
-
-func (r *InMemoryUserRepo) Delete(ctx context.Context, id int) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.users[id]; !ok {
-		return repository.ErrUserNotFound
-	}
-
-	delete(r.users, id)
-	return nil
-}
-
-func (r *InMemoryUserRepo) WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
-	return fn(ctx)
-}
-
-type InMemoryRefreshTokenRepo struct {
-	mu     sync.RWMutex
-	tokens map[string]*model.RefreshToken
-	seq    int
-}
-
-func NewInMemoryRefreshTokenRepo() *InMemoryRefreshTokenRepo {
-	return &InMemoryRefreshTokenRepo{
-		tokens: make(map[string]*model.RefreshToken),
-	}
-}
-
-func (r *InMemoryRefreshTokenRepo) Store(value string, userID int, expiresAt time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.seq++
-
-	r.tokens[value] = &model.RefreshToken{
-		Value:     uuid.FromStringOrNil(value),
-		UserID:    userID,
-		ExpiresAt: expiresAt,
-		CreatedAt: time.Now(),
-	}
-}
-
-func (r *InMemoryRefreshTokenRepo) Create(ctx context.Context, token *model.RefreshToken) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	key := token.Value.String()
-	if _, exists := r.tokens[key]; exists {
-		return errors.New("token already exists")
-	}
-
-	r.tokens[key] = token
-	return nil
-}
-
-func (r *InMemoryRefreshTokenRepo) GetByValue(ctx context.Context, value uuid.UUID) (*model.RefreshToken, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	token, ok := r.tokens[value.String()]
-	if !ok {
-		return nil, repository.ErrRefreshTokenNotFound
-	}
-
-	copy := *token
-	return &copy, nil
-}
-
-func (r *InMemoryRefreshTokenRepo) DeleteByValue(ctx context.Context, value uuid.UUID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	key := value.String()
-	if _, ok := r.tokens[key]; !ok {
-		return repository.ErrRefreshTokenNotFound
-	}
-
-	delete(r.tokens, key)
-	return nil
-}
-
-func (r *InMemoryRefreshTokenRepo) DeleteByUserID(ctx context.Context, userID int) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for key, token := range r.tokens {
-		if token.UserID == userID {
-			delete(r.tokens, key)
-		}
-	}
-
-	return nil
-}
-
-func (r *InMemoryRefreshTokenRepo) WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
-	return fn(ctx)
-}
-
 // data
 var (
 	validUUID, _   = uuid.NewV4()
@@ -235,8 +33,8 @@ var (
 func setupAuthTestRouter() http.Handler {
 	logging.Init(&logging.LoggerConfig{})
 
-	userRepo := NewInMemoryUserRepo()
-	refreshRepo := NewInMemoryRefreshTokenRepo()
+	userRepo := repository.NewInMemoryUserRepo()
+	refreshRepo := repository.NewInMemoryRefreshTokenRepo()
 
 	refreshRepo.Store(validUUID.String(), 1, time.Now().Add(time.Hour))
 	refreshRepo.Store(expiredUUID.String(), 1, time.Now().Add(-time.Hour))

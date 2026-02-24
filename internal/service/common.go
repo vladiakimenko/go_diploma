@@ -1,8 +1,9 @@
 package service
 
 import (
-	"blog-api/pkg/logging"
 	"errors"
+
+	"blog-api/pkg/logging"
 )
 
 var logger = logging.L()
