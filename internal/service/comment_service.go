@@ -85,43 +85,47 @@ func (s *CommentService) GetByPost(
 	postID int,
 	pagination *model.PaginationParams,
 ) ([]*model.Comment, int, error) {
+
+	if err := s.ensurePostPublished(ctx, postID); err != nil {
+		return nil, 0, err
+	}
+
 	comments, err := s.commentRepo.GetByPostID(ctx, postID, *pagination.Limit, *pagination.Offset)
 	if err != nil {
 		logger.Error("failed to fetch comments for post_id=%d: %v", postID, err)
 		return nil, 0, ErrDatabase
 	}
+
 	total, err := s.commentRepo.GetCountByPostID(ctx, postID)
 	if err != nil {
 		logger.Error("failed to count comments for post_id=%d: %v", postID, err)
 		return nil, 0, ErrDatabase
 	}
+
 	return comments, total, nil
 }
 
-func (s *CommentService) Update(
-	ctx context.Context,
-	id int,
-	userID int,
-	req *model.CommentUpdateRequest,
-) (*model.Comment, error) {
+func (s *CommentService) Update(ctx context.Context, id int, userID int, req *model.CommentUpdateRequest) (*model.Comment, error) {
 	comment, err := s.commentRepo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrCommentNotFound) {
-			logger.Info("comment with id=%d not found", id)
 			return nil, ErrCommentNotFound
 		}
-		logger.Error("failed to get comment by id=%d: %v", id, err)
-		return nil, ErrDatabase
-	}
-	if err := s.checkOwner(comment, userID); err != nil {
-		return nil, err
-	}
-	comment.Content = req.Content
-	if err := s.commentRepo.Update(ctx, comment); err != nil {
-		logger.Error("failed to update comment id=%d: %v", id, err)
 		return nil, ErrDatabase
 	}
 
+	if err := s.ensurePostPublished(ctx, comment.PostID); err != nil {
+		return nil, err
+	}
+
+	if err := s.checkOwner(comment, userID); err != nil {
+		return nil, err
+	}
+
+	comment.Content = req.Content
+	if err := s.commentRepo.Update(ctx, comment); err != nil {
+		return nil, ErrDatabase
+	}
 	return comment, nil
 }
 
@@ -173,6 +177,19 @@ func (s *CommentService) checkOwner(comment *model.Comment, userID int) error {
 			comment.AuthorID,
 		)
 		return ErrForbidden
+	}
+	return nil
+}
+
+func (s *CommentService) ensurePostPublished(ctx context.Context, postID int) error {
+	published := true
+	_, err := s.postRepo.GetPost(ctx, postID, &repository.PostFilter{Published: &published})
+	if err != nil {
+		if errors.Is(err, repository.ErrPostNotFound) {
+			return ErrCommentNotFound
+		}
+		logger.Error("failed to fetch post for post_id=%d: %v", postID, err)
+		return ErrDatabase
 	}
 	return nil
 }
